@@ -37,4 +37,4 @@ Images/
 - dbatools
 ## Author
 
-Minhaj Ahme
+Minhaj Ahmed
