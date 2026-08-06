@@ -24,8 +24,6 @@ Part of my broader portfolio — see [00-DBA-Lab](https://github.com/minhajah/00
 | Maintenance Plans | 🚧 Planned |
 | Health Checks | 🚧 Planned |
 
-> Update the status column as you add real content — change 🚧 Planned to ✅ Available and link the topic name directly to its script or lab file once it exists.
-
 ---
 
 ## Repository Structure
