@@ -62,3 +62,24 @@ CROSS APPLY sys.dm_os_volume_stats(f.database_id, f.file_id) vs
 WHERE f.type_desc = 'ROWS'
   AND f.database_id > 4          -- skip system databases
 ORDER BY allocated_mb DESC;
+
+for table size:
+
+SET NOCOUNT ON;
+SET LOCK_TIMEOUT 5000;
+
+SELECT CONVERT(date, GETDATE())                         AS capture_date,
+       @@SERVERNAME                                     AS server_name,
+       DB_NAME()                                        AS database_name,
+       s.name + '.' + t.name                            AS table_name,
+       SUM(CASE WHEN ps.index_id < 2 THEN ps.row_count ELSE 0 END) AS row_count,
+       SUM(ps.used_page_count) * 8 / 1024               AS total_used_mb,
+       SUM(CASE WHEN ps.index_id < 2 THEN ps.used_page_count ELSE 0 END) * 8 / 1024 AS data_mb,
+       SUM(CASE WHEN ps.index_id >= 2 THEN ps.used_page_count ELSE 0 END) * 8 / 1024 AS index_mb,
+       SUM(ps.lob_used_page_count) * 8 / 1024           AS lob_mb
+FROM sys.dm_db_partition_stats ps
+JOIN sys.tables t  ON t.object_id = ps.object_id
+JOIN sys.schemas s ON s.schema_id = t.schema_id
+GROUP BY s.name, t.name
+HAVING SUM(ps.used_page_count) * 8 / 1024 >= 100      -- only tables of 100 MB or more
+ORDER BY total_used_mb DESC;
