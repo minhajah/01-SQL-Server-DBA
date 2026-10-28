@@ -1,0 +1,48 @@
+Part A: Daily growth from backup history (run in any database context)
+sql
+SET NOCOUNT ON;
+SET LOCK_TIMEOUT 5000;
+
+DECLARE @DbName sysname = NULL;   -- NULL = all user databases, or set e.g. N'SecretServer'
+DECLARE @days   int     = 60;     -- how far back to look
+
+;WITH daily AS (
+    SELECT BS.database_name,
+           CONVERT(date, BS.backup_start_date) AS backup_day,
+           CONVERT(numeric(12,1), MAX(BS.backup_size) / 1048576.0) AS backup_size_mb
+    FROM msdb.dbo.backupset BS
+    WHERE BS.type = 'D'                                   -- full backups only
+      AND BS.database_name NOT IN ('master','msdb','model','tempdb')
+      AND (@DbName IS NULL OR BS.database_name = @DbName)
+      AND BS.backup_start_date >= DATEADD(DAY, -@days, GETDATE())
+    GROUP BY BS.database_name, CONVERT(date, BS.backup_start_date)
+),
+calc AS (
+    SELECT database_name, backup_day, backup_size_mb,
+           backup_size_mb - LAG(backup_size_mb) OVER (PARTITION BY database_name ORDER BY backup_day) AS growth_mb,
+           DATEDIFF(DAY, LAG(backup_day) OVER (PARTITION BY database_name ORDER BY backup_day), backup_day) AS days_since_prev
+    FROM daily
+)
+SELECT database_name, backup_day, backup_size_mb, growth_mb, days_since_prev,
+       CONVERT(numeric(12,1), growth_mb / NULLIF(days_since_prev, 0)) AS avg_growth_mb_per_day
+FROM calc
+ORDER BY database_name, backup_day;
+
+
+
+Part B: Daily snapshot (run inside the Secret Server database)
+sql
+SET NOCOUNT ON;
+
+SELECT CONVERT(date, GETDATE())                                        AS capture_date,
+       @@SERVERNAME                                                    AS server_name,
+       DB_NAME()                                                       AS database_name,
+       f.name                                                          AS file_name,
+       CONVERT(bigint, f.size) * 8 / 1024                              AS allocated_mb,
+       CONVERT(bigint, FILEPROPERTY(f.name,'SpaceUsed')) * 8 / 1024    AS used_mb,
+       (CONVERT(bigint, f.size) - FILEPROPERTY(f.name,'SpaceUsed')) * 8 / 1024 AS free_in_file_mb,
+       vs.volume_mount_point                                           AS drive,
+       CONVERT(bigint, vs.available_bytes) / 1048576                   AS disk_free_mb
+FROM sys.database_files f
+CROSS APPLY sys.dm_os_volume_stats(DB_ID(), f.file_id) vs
+WHERE f.type_desc = 'ROWS';
