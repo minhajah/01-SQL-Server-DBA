@@ -46,3 +46,19 @@ SELECT CONVERT(date, GETDATE())                                        AS captur
 FROM sys.database_files f
 CROSS APPLY sys.dm_os_volume_stats(DB_ID(), f.file_id) vs
 WHERE f.type_desc = 'ROWS';
+
+to see all
+SET NOCOUNT ON;
+
+SELECT CONVERT(date, GETDATE())                    AS capture_date,
+       @@SERVERNAME                                AS server_name,
+       DB_NAME(f.database_id)                      AS database_name,
+       f.name                                      AS file_name,
+       CONVERT(bigint, f.size) * 8 / 1024          AS allocated_mb,
+       vs.volume_mount_point                       AS drive,
+       CONVERT(bigint, vs.available_bytes) / 1048576 AS disk_free_mb
+FROM sys.master_files f
+CROSS APPLY sys.dm_os_volume_stats(f.database_id, f.file_id) vs
+WHERE f.type_desc = 'ROWS'
+  AND f.database_id > 4          -- skip system databases
+ORDER BY allocated_mb DESC;
