@@ -119,3 +119,14 @@ WHERE
     h.CreatedDate >= '2026-10-23' -- Put last Friday's date here
 ORDER BY 
     h.ProxySessionId DESC;
+
+
+DECLARE @maxid BIGINT;
+SELECT @maxid = MAX(ProxySessionDataHashId) FROM dbo.tbProxySessionDataHash WITH (NOLOCK);
+
+SELECT TOP (25) h.ProxySessionDataId, COUNT(*) AS hash_rows
+FROM dbo.tbProxySessionDataHash h WITH (NOLOCK)
+WHERE h.ProxySessionDataHashId > @maxid - 5000000
+GROUP BY h.ProxySessionDataId
+ORDER BY hash_rows DESC
+OPTION (MAXDOP 1);
