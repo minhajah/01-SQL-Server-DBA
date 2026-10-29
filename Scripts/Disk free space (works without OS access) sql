@@ -1,0 +1,34 @@
+/*  Script  : 02_disk_free_space.sql
+    Use when: Disk full alerts, file growth failing, planning cleanup
+    Safety  : READ-ONLY, very low impact (DMV only)
+    Needs   : VIEW SERVER STATE
+    Version : SQL Server 2008 R2 SP1+  */
+SET NOCOUNT ON;
+
+SELECT DISTINCT
+        vs.volume_mount_point                                        AS Volume,
+        vs.logical_volume_name                                       AS Label,
+        CAST(vs.total_bytes / 1073741824.0     AS DECIMAL(12,1))     AS TotalGB,
+        CAST(vs.available_bytes / 1073741824.0 AS DECIMAL(12,1))     AS FreeGB,
+        CAST(vs.available_bytes * 100.0 / vs.total_bytes AS DECIMAL(5,1)) AS FreePct
+FROM    sys.master_files mf
+CROSS APPLY sys.dm_os_volume_stats(mf.database_id, mf.file_id) vs
+ORDER BY FreePct ASC
+OPTION (MAXDOP 1);
+
+-- Which databases and files live on which volume, and their growth settings
+SELECT  DB_NAME(mf.database_id)  AS DatabaseName,
+        mf.name                  AS LogicalFile,
+        mf.type_desc             AS FileType,
+        vs.volume_mount_point    AS Volume,
+        CAST(mf.size * 8.0 / 1024 AS DECIMAL(14,1)) AS SizeMB,
+        CASE WHEN mf.max_size = -1 THEN 'Unlimited'
+             WHEN mf.max_size = 0  THEN 'No growth'
+             ELSE CAST(mf.max_size * 8 / 1024 AS VARCHAR(20)) + ' MB' END AS MaxSize,
+        CASE WHEN mf.is_percent_growth = 1 THEN CAST(mf.growth AS VARCHAR(10)) + ' %'
+             ELSE CAST(mf.growth * 8 / 1024 AS VARCHAR(20)) + ' MB' END   AS Growth,
+        mf.physical_name
+FROM    sys.master_files mf
+CROSS APPLY sys.dm_os_volume_stats(mf.database_id, mf.file_id) vs
+ORDER BY vs.volume_mount_point, mf.size DESC
+OPTION (MAXDOP 1);
