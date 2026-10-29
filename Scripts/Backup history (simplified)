@@ -1,0 +1,31 @@
+/*  Script  : 01_backup_history.sql
+    Use when: Checking when each database was last backed up
+    Safety  : READ-ONLY, low impact
+    Needs   : Read access to msdb
+    Version : SQL Server 2012+  */
+SET NOCOUNT ON;
+SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+SET LOCK_TIMEOUT 5000;
+
+SELECT  d.name                  AS DatabaseName,
+        d.recovery_model_desc   AS RecoveryModel,
+        d.state_desc            AS State,
+        MAX(CASE WHEN bs.type = 'D' AND bs.is_copy_only = 0 THEN bs.backup_finish_date END) AS LastFull,
+        MAX(CASE WHEN bs.type = 'I' THEN bs.backup_finish_date END)                         AS LastDiff,
+        MAX(CASE WHEN bs.type = 'L' THEN bs.backup_finish_date END)                         AS LastLog,
+        DATEDIFF(HOUR, MAX(CASE WHEN bs.type = 'D' AND bs.is_copy_only = 0
+                                THEN bs.backup_finish_date END), GETDATE())                 AS HoursSinceFull
+FROM    sys.databases d
+LEFT JOIN msdb.dbo.backupset bs
+       ON bs.database_name = d.name
+      AND bs.backup_finish_date >= DATEADD(DAY, -90, GETDATE())
+WHERE   d.name <> 'tempdb'
+GROUP BY d.name, d.recovery_model_desc, d.state_desc
+ORDER BY LastFull ASC, d.name
+OPTION (MAXDOP 1);
+
+/*  How to read it:
+    - LastFull NULL      = no full backup in the last 90 days of history
+    - FULL recovery + LastLog NULL = log is never truncated, so it will keep growing
+    - Third-party tools (VSS/snapshot) or Always On secondaries may not appear here;
+      check the tool or the other replica.  */
