@@ -83,3 +83,39 @@ JOIN sys.schemas s ON s.schema_id = t.schema_id
 GROUP BY s.name, t.name
 HAVING SUM(ps.used_page_count) * 8 / 1024 >= 100      -- only tables of 100 MB or more
 ORDER BY total_used_mb DESC;
+
+Run this query to find out exactly which day and hour the rows are flooding into this table:
+sql
+SELECT 
+    CAST(CreatedDate AS DATE) AS DiscoveredDate,
+    DATEPART(HOUR, CreatedDate) AS DiscoveredHour,
+    COUNT(*) AS RowsInserted
+FROM 
+    tbProxySessionDataHash
+WHERE 
+    CreatedDate >= DATEADD(day, -7, GETDATE()) -- Checks the last week
+GROUP BY 
+    CAST(CreatedDate AS DATE),
+    DATEPART(HOUR, CreatedDate)
+ORDER BY 
+    RowsInserted DESC;
+
+tbProxySessionDataHash links back to the actual connection logs. Join it with the main proxy session tables to see who logged in, what asset they connected to, and when it happened over the weekend:
+sql
+SELECT TOP 50
+    h.CreatedDate,
+    p.ProxySessionId,
+    p.UserName,
+    p.SecretName,
+    p.HostName,
+    p.StartTime,
+    p.EndTime
+FROM 
+    tbProxySessionDataHash h
+-- Adjust table joins based on Delinea schema (commonly tbProxySession or tbSecretProxySession)
+INNER JOIN 
+    tbProxySession p ON h.ProxySessionId = p.ProxySessionId 
+WHERE 
+    h.CreatedDate >= '2026-10-23' -- Put last Friday's date here
+ORDER BY 
+    h.ProxySessionId DESC;
