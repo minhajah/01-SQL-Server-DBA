@@ -1,0 +1,80 @@
+/*==============================================================================
+  Script      : 01_backup_status.sql
+  Category    : 04-backup-and-recovery
+  Purpose     : Find databases with missing or stale full/diff/log backups
+  Safety      : READ-ONLY. Makes no changes to any database or server setting.
+  Impact      : LOW (reads msdb backup history only, bounded to last 90 days)
+  Permissions : SELECT on msdb.dbo.backupset (db_datareader on msdb or sysadmin)
+  Min version : SQL Server 2012+
+  Output      : One row per database, worst severity first
+==============================================================================*/
+SET NOCOUNT ON;
+SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+SET LOCK_TIMEOUT 5000;
+
+-- ---- Thresholds: adjust to your backup schedule ----------------------------
+DECLARE @FullWarnHours  INT = 192;   -- 8 days  (assumes at least a weekly full)
+DECLARE @FullCritHours  INT = 336;   -- 14 days
+DECLARE @LogWarnMinutes INT = 120;   -- 2 hours  (FULL/BULK_LOGGED databases only)
+DECLARE @LogCritMinutes INT = 360;   -- 6 hours
+DECLARE @LookbackDays   INT = 90;    -- history window; "never" means none in this window
+-- -----------------------------------------------------------------------------
+
+;WITH bk AS
+(
+    SELECT  bs.database_name,
+            MAX(CASE WHEN bs.type = 'D' AND bs.is_copy_only = 0 THEN bs.backup_finish_date END) AS last_full,
+            MAX(CASE WHEN bs.type = 'I' AND bs.is_copy_only = 0 THEN bs.backup_finish_date END) AS last_diff,
+            MAX(CASE WHEN bs.type = 'L'                         THEN bs.backup_finish_date END) AS last_log
+    FROM    msdb.dbo.backupset bs
+    WHERE   bs.backup_finish_date >= DATEADD(DAY, -@LookbackDays, GETDATE())
+    GROUP BY bs.database_name
+),
+calc AS
+(
+    SELECT  d.name                      AS DatabaseName,
+            d.recovery_model_desc       AS RecoveryModel,
+            b.last_full, b.last_diff, b.last_log,
+            DATEDIFF(HOUR,   b.last_full, GETDATE()) AS HoursSinceFull,
+            DATEDIFF(MINUTE, b.last_log,  GETDATE()) AS MinutesSinceLog,
+            CASE WHEN b.last_full IS NULL                                   THEN 'CRITICAL'
+                 WHEN DATEDIFF(HOUR, b.last_full, GETDATE()) > @FullCritHours THEN 'CRITICAL'
+                 WHEN DATEDIFF(HOUR, b.last_full, GETDATE()) > @FullWarnHours THEN 'WARNING'
+                 ELSE 'OK' END                                              AS FullSeverity,
+            CASE WHEN d.recovery_model_desc = 'SIMPLE'                      THEN 'N/A'
+                 WHEN b.last_log IS NULL                                    THEN 'CRITICAL'
+                 WHEN DATEDIFF(MINUTE, b.last_log, GETDATE()) > @LogCritMinutes THEN 'CRITICAL'
+                 WHEN DATEDIFF(MINUTE, b.last_log, GETDATE()) > @LogWarnMinutes THEN 'WARNING'
+                 ELSE 'OK' END                                              AS LogSeverity
+    FROM    sys.databases d
+    LEFT JOIN bk b ON b.database_name = d.name
+    WHERE   d.name <> 'tempdb'
+      AND   d.state_desc = 'ONLINE'
+      AND   d.source_database_id IS NULL        -- exclude database snapshots
+)
+SELECT  DatabaseName,
+        RecoveryModel,
+        CASE WHEN 'CRITICAL' IN (FullSeverity, LogSeverity) THEN 'CRITICAL'
+             WHEN 'WARNING'  IN (FullSeverity, LogSeverity) THEN 'WARNING'
+             ELSE 'OK' END                                   AS Severity,
+        FullSeverity, LogSeverity,
+        last_full  AS LastFullBackup,
+        last_diff  AS LastDiffBackup,
+        last_log   AS LastLogBackup,
+        HoursSinceFull, MinutesSinceLog,
+        CASE
+            WHEN last_full IS NULL
+                THEN 'No full backup in history. Verify backup jobs/tooling and take a full backup.'
+            WHEN FullSeverity <> 'OK'
+                THEN 'Full backup is stale. Check the backup job history and storage target.'
+            WHEN LogSeverity = 'CRITICAL' AND last_log IS NULL
+                THEN 'FULL recovery with no log backups: log will grow unbounded. Schedule log backups or switch to SIMPLE if point-in-time recovery is not needed.'
+            WHEN LogSeverity <> 'OK' AND LogSeverity <> 'N/A'
+                THEN 'Log backups are late. Check the log backup job and log file growth.'
+            ELSE 'No action needed.'
+        END                                                  AS RecommendedAction
+FROM    calc
+ORDER BY CASE WHEN 'CRITICAL' IN (FullSeverity, LogSeverity) THEN 0
+              WHEN 'WARNING'  IN (FullSeverity, LogSeverity) THEN 1 ELSE 2 END,
+         DatabaseName
+OPTION (MAXDOP 1);
