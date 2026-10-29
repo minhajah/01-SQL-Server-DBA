@@ -130,3 +130,24 @@ WHERE h.ProxySessionDataHashId > @maxid - 5000000
 GROUP BY h.ProxySessionDataId
 ORDER BY hash_rows DESC
 OPTION (MAXDOP 1);
+
+SET NOCOUNT ON;
+SELECT o.name AS table_name, c.name AS column_name, ty.name AS type_name,
+       c.max_length, c.is_identity
+FROM sys.columns c
+JOIN sys.objects o ON o.object_id = c.object_id
+JOIN sys.types ty  ON ty.user_type_id = c.user_type_id
+WHERE o.name IN ('tbProxySessionDataHash','tbProxySessionData')
+ORDER BY o.name, c.column_id;
+
+-- Which indexes exist and on which columns (so we know which lookups are cheap)
+SELECT OBJECT_NAME(i.object_id) AS table_name, i.name AS index_name, i.type_desc,
+       i.is_primary_key,
+       STUFF((SELECT ', ' + c.name
+              FROM sys.index_columns ic
+              JOIN sys.columns c ON c.object_id = ic.object_id AND c.column_id = ic.column_id
+              WHERE ic.object_id = i.object_id AND ic.index_id = i.index_id AND ic.is_included_column = 0
+              ORDER BY ic.key_ordinal FOR XML PATH('')), 1, 2, '') AS key_columns
+FROM sys.indexes i
+WHERE i.object_id IN (OBJECT_ID('dbo.tbProxySessionDataHash'), OBJECT_ID('dbo.tbProxySessionData'))
+  AND i.index_id > 0;
