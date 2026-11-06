@@ -173,3 +173,19 @@ GROUP BY
 ORDER BY TotalHashRows DESC;
 ----------------------------------------------------
 ALTER INDEX ALL ON tbProxySessionDataHash REBUILD WITH (ONLINE = ON);
+
+---------------------------------------------------------
+SELECT 
+    ProxySessionDataTypeId,
+    CASE 
+        WHEN ProxySessionDataTypeId = 1 THEN 'SSH Terminal Text / Command Log'
+        WHEN ProxySessionDataTypeId = 2 THEN 'RDP Keystroke Log'
+        WHEN ProxySessionDataTypeId = 3 THEN 'Graphical Frame Metadata'
+        ELSE 'Other Metadata Type'
+    END AS DataDescription,
+    COUNT_BIG(*) AS TotalRows,
+    CAST(ROUND((COUNT_BIG(*) * 1.01) / 1024.0, 2) AS NUMERIC(36,2)) AS EstSpaceMB
+FROM tbProxySessionDataHash WITH (NOLOCK)
+GROUP BY ProxySessionDataTypeId
+ORDER BY TotalRows DESC;
+
