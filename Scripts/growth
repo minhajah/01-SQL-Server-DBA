@@ -151,3 +151,25 @@ SELECT OBJECT_NAME(i.object_id) AS table_name, i.name AS index_name, i.type_desc
 FROM sys.indexes i
 WHERE i.object_id IN (OBJECT_ID('dbo.tbProxySessionDataHash'), OBJECT_ID('dbo.tbProxySessionData'))
   AND i.index_id > 0;
+
+------------------------------------------------
+SELECT TOP 5
+    psh.SecretSessionId,
+    s.SecretName AS [Secret/Server Name],
+    u.DisplayName AS [Username],
+    ss.StartDate AS [Session Started],
+    ss.EndDate AS [Session Ended],
+    COUNT_BIG(psh.ProxySessionDataHashId) AS TotalHashRows
+FROM tbProxySessionDataHash psh WITH (NOLOCK)
+INNER JOIN tbSecretSession ss WITH (NOLOCK) ON psh.SecretSessionId = ss.SecretSessionId
+LEFT JOIN tbSecret s WITH (NOLOCK) ON ss.SecretId = s.SecretID
+LEFT JOIN tbUser u WITH (NOLOCK) ON ss.UserId = u.UserId
+GROUP BY 
+    psh.SecretSessionId, 
+    s.SecretName, 
+    u.DisplayName, 
+    ss.StartDate, 
+    ss.EndDate
+ORDER BY TotalHashRows DESC;
+----------------------------------------------------
+ALTER INDEX ALL ON tbProxySessionDataHash REBUILD WITH (ONLINE = ON);
