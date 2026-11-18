@@ -1,0 +1,22 @@
+SELECT
+    r.session_id,
+    r.blocking_session_id,
+    r.command,
+    r.status,
+    r.wait_type,
+    r.wait_time / 1000.0 AS wait_seconds,
+    r.wait_resource,
+    DB_NAME(r.database_id) AS database_name,
+    s.login_name,
+    s.host_name,
+    s.program_name,
+    r.percent_complete,
+    r.total_elapsed_time / 60000.0 AS elapsed_minutes,
+    t.text AS sql_text
+FROM sys.dm_exec_requests r
+JOIN sys.dm_exec_sessions s
+    ON r.session_id = s.session_id
+OUTER APPLY sys.dm_exec_sql_text(r.sql_handle) t
+WHERE r.blocking_session_id <> 0
+   OR r.command LIKE 'BACKUP%'
+ORDER BY r.blocking_session_id, r.session_id;
